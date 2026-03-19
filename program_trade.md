@@ -129,7 +129,7 @@ numba for speed.  This separation is important because the optimiser calls
 python trading.py --mode walkforward --strategy strategy > run.log 2>&1
 ```
 
-Default settings: 4 US large-cap stocks (AAPL, MSFT, GOOGL, AMZN), 365/90/90 day
+Default settings: 4 US large-cap growth stocks (AAPL, AMD, GOOGL, NVDA), 365/90/90 day
 train/test/step, 24 parallel retries, 500 evaluations per retry.
 
 For faster iteration during exploration, you can reduce the load:

@@ -276,13 +276,14 @@ and asks it to fix the bug.  Up to 3 attempts per idea.  This handles the most
 common failure mode — numba type errors from calling non-njit functions inside
 @njit blocks.
 
-**Context management**: each turn, the LLM receives a freshly built user message
-containing the top-K best experiments (sorted by score) and last-K recent
-experiments (deduplicated), plus the current best strategy code and the last
-discarded strategy code.  Only 2 lightweight conversation exchanges are kept
-(brief summaries, no code duplication).  This design ensures the LLM always sees
-what works best from any point in history while using under 2000 tokens for the
-full experiment summary.
+**Context management**: each turn, the LLM receives a curated user message with
+best overall experiments, best-per-family representatives, strong discarded
+near-misses, representative failure modes, and recent experiments, plus the
+current best strategy code and one informative discarded strategy from a
+different family.  Only 2 lightweight conversation exchanges are kept (brief
+summaries, no code duplication).  This keeps the prompt diverse enough to avoid
+getting stuck in one strategy family while still fitting comfortably in a 50K
+context window.
 
 **No tool use**: unlike agentic frameworks that have the LLM drive individual bash
 commands, this design has the LLM produce exactly one artifact per round trip — a
@@ -498,7 +499,7 @@ git log --oneline autoresearch/mar18
 
 ### Different assets
 
-The default tickers are US large-cap stocks: `AAPL MSFT GOOGL AMZN`.  Any
+The default tickers are US large-cap growth stocks: `AAPL AMD GOOGL NVDA`.  Any
 Yahoo Finance ticker works.  Examples:
 
 ```bash
@@ -536,25 +537,26 @@ quantisation with 50K context.  Any OpenAI-compatible API endpoint works.
 
 ### Agent context tuning
 
-The agent shows the LLM two sets of experiments: the **top-K best** (sorted by
-score) and the **last-K recent** (deduplicated against top-K).  This ensures the
-LLM always sees what works best — even from 100 experiments ago — while also
-knowing what was just tried.
+The agent builds a curated prompt from several buckets: best overall
+experiments, best-per-family representatives, strong discarded near-misses,
+representative failure modes, and recent experiments.  `--top-k` controls the
+main curated best/diverse budget, while `--recent-k` controls the explicit
+recent-history tail.
 
 ```bash
-# Default: 10 best + 10 recent (~1800 tokens, fits easily in 50K)
+# Default: curated best/diverse summary + 10 recent experiments
 python agent.py
 
 # Leaner context for smaller models
 python agent.py --top-k 5 --recent-k 5
 
-# Richer history for 100K+ context (122B model on Apple Silicon)
+# Richer prompt for 100K+ context or stronger hosted models
 python agent.py --top-k 20 --recent-k 15
 ```
 
 Conversation exchanges are kept lightweight (2 brief exchanges, no code
-duplication).  The full context — strategy code, experiment history, discarded
-code — is regenerated fresh each turn in the user message.
+duplication).  The full context — strategy code, curated experiment history, and
+reference discarded code — is regenerated fresh each turn in the user message.
 
 ## Design rationale
 
