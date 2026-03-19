@@ -4,23 +4,24 @@ from strategy_helpers import *
 
 def get_strategy() -> dict:
     return dict(
-        name="ema_sma_adx_roc_atr_v2",
+        name="ema_sma_adx_roc_obv_atr",
         variables=["ema_period", "sma_period", "adx_period", "adx_threshold",
-                   "roc_period", "roc_threshold", "atr_period", 
-                   "trailing_stop_pct", "wait_sell"],
-        bounds=([30, 40, 10, 15, 15, 0, 20, 1.5, 120],
-                [60, 60, 25, 25, 30, 2.0, 45, 4.0, 200]),
+                   "roc_period", "roc_threshold", "obv_period",
+                   "atr_period", "trailing_stop_pct", "wait_sell"],
+        bounds=([30, 40, 10, 15, 15, 0.5, 10, 20, 1.5, 80],
+                [60, 60, 25, 20, 30, 2.0, 30, 45, 3.0, 150]),
         simulate=simulate,
     )
 
 def simulate(close: np.ndarray, high: np.ndarray, low: np.ndarray,
              volume: np.ndarray, x: np.ndarray) -> tuple:
     """
-    Streamlined trend-following strategy:
+    Hybrid trend-following strategy combining the best elements:
     - EMA-SMA crossover as core entry/exit signal
     - ADX trend filter to avoid whipsaws (especially AAPL)
     - ROC momentum confirmation for entry quality
-    - Percentage-based ATR trailing stop for risk management
+    - OBV volume confirmation for signal strength
+    - ATR trailing stop for risk management
     - Asymmetric cooldowns (shorter buy, longer sell)
     """
     ema_period = int(x[0])
@@ -29,9 +30,10 @@ def simulate(close: np.ndarray, high: np.ndarray, low: np.ndarray,
     adx_threshold = float(x[3])
     roc_period = max(int(x[4]), 1)
     roc_threshold = float(x[5])
-    atr_period = max(int(x[6]), 1)
-    trailing_stop_pct = float(x[7])
-    wait_sell = int(x[8])
+    obv_period = max(int(x[6]), 1)
+    atr_period = max(int(x[7]), 1)
+    trailing_stop_pct = float(x[8])
+    wait_sell = int(x[9])
     
     # Pre-compute indicators
     ema = ema_np(close, ema_period)
@@ -39,14 +41,15 @@ def simulate(close: np.ndarray, high: np.ndarray, low: np.ndarray,
     adx_data = adx_np(high, low, close, adx_period)
     adx = adx_data[0]
     roc = roc_np(close, roc_period)
+    obv = obv_np(close, volume)
     atr = atr_np(high, low, close, atr_period)
     
-    return _execute(close, 1_000_000.0, ema, sma, adx, roc, atr,
+    return _execute(close, 1_000_000.0, ema, sma, adx, roc, obv, atr,
                     adx_threshold, roc_threshold, trailing_stop_pct,
                     wait_sell)
 
 @njit(fastmath=True)
-def _execute(close, start_cash, ema, sma, adx, roc, atr,
+def _execute(close, start_cash, ema, sma, adx, roc, obv, atr,
              adx_threshold, roc_threshold, trailing_stop_pct,
              wait_sell):
     cash = start_cash
@@ -54,9 +57,8 @@ def _execute(close, start_cash, ema, sma, adx, roc, atr,
     last_trade = 0
     num_trades = 0
     peak_price = 0.0
-    
-    # Buy cooldown is implicit: after a trade, we need price to re-confirm
-    # which naturally creates a short wait period before next buy
+    obv_prev = 0.0
+    roc_cooldown = 0
     
     for i in range(len(close)):
         price = close[i]
@@ -64,12 +66,13 @@ def _execute(close, start_cash, ema, sma, adx, roc, atr,
         c_sma = sma[i]
         c_adx = adx[i]
         c_roc = roc[i]
+        c_obv = obv[i]
         c_atr = atr[i]
         
         # Skip NaN values
         if np.isnan(c_ema) or np.isnan(c_sma) or np.isnan(c_adx):
             continue
-        if np.isnan(c_roc) or np.isnan(c_atr):
+        if np.isnan(c_roc) or np.isnan(c_obv) or np.isnan(c_atr):
             continue
         
         # Update peak for trailing stop (track highest price since entry)
@@ -84,6 +87,7 @@ def _execute(close, start_cash, ema, sma, adx, roc, atr,
                 last_trade = i
                 num_trades += 1
                 peak_price = 0.0
+                roc_cooldown = 5
                 continue
         
         # BUY SIGNAL: Multiple confirmations required
@@ -91,21 +95,32 @@ def _execute(close, start_cash, ema, sma, adx, roc, atr,
             # 1. EMA > SMA (uptrend direction)
             # 2. ADX > threshold (trend strength, filters AAPL whipsaws)
             # 3. ROC > threshold (positive momentum)
-            # 4. Cooldown period respected (5 days minimum)
+            # 4. OBV rising (volume confirmation)
+            # 5. Cooldown period respected (5 days minimum)
+            # 6. ROC cooldown to prevent rapid re-entry
+            obv_rising = c_obv > obv_prev if i > 0 else True
+            roc_valid = i >= roc_cooldown
+            
             if (c_ema > c_sma and 
                 c_adx > adx_threshold and 
                 c_roc > roc_threshold and
-                i > last_trade + 5):
+                obv_rising and
+                i > last_trade + 5 and
+                roc_valid):
                 cash, num_coins = buy_all(cash, num_coins, price)
                 last_trade = i
                 num_trades += 1
                 peak_price = price
+                roc_cooldown = 5
+        
         # SELL SIGNAL: EMA crosses below SMA (trend reversal)
         # Longer cooldown to avoid being shaken out of strong trends
         elif num_coins > 0 and c_ema < c_sma and i > last_trade + wait_sell:
             cash, num_coins = sell_all(cash, num_coins, price)
             last_trade = i
             num_trades += 1
+        
+        obv_prev = c_obv
 
     # Force-sell at end of period
     cash, num_coins = sell_all(cash, num_coins, close[-1])
