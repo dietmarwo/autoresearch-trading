@@ -1,3 +1,5 @@
+![](https://github.com/dietmarwo/fast-cma-es/blob/master/tutorials/img/logo.gif)
+
 # autoresearch-trading
 
 Autonomous AI-driven discovery of trading strategies, inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch).
