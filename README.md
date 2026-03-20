@@ -448,24 +448,22 @@ APIs.
 **Hosted API alternatives**
 
 If you want higher-quality strategy proposals than a local 27B-35B model can
-usually deliver, the easiest upgrade path is a hosted frontier API.
+usually deliver, or you have no capable graphic card, 
+the easiest upgrade path is a hosted frontier API.
 
-**OpenAI API**
+**MiniMax2.7 via Anthropic native API**
 
 ```bash
-export OPENAI_API_KEY=your_openai_key
+pip install anthropic
+export MINIMAX_API_KEY=MINIMAX_API_KEY
 
-# Best value hosted option for coding / subagent work
-python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4-mini --tag mar18
-
-# Quality-first hosted option
-python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4 --tag mar18
+# Native Anthropic SDK path
+python agent.py --model MiniMax-M2.7 --tag mar18
 ```
 
-OpenAI announced GPT-5.4 mini as a major upgrade over GPT-5 mini for coding,
-tool use, and subagent workflows while remaining much faster than the full
-flagship model.  If your account exposes a snapshot or provider-specific alias
-instead of the short name above, pass that exact model id via `--model`.
+MiniMax-M2.7 is a cheap but very capable new model. Excellent 
+in coding, computer use and agent planning. Start with this if
+you have no capable graphic card. 
 
 **Anthropic native API**
 
@@ -487,8 +485,11 @@ agent planning.
 pip install google-genai
 export GEMINI_API_KEY=your_gemini_key
 
-python agent.py --model gemini-3.1-pro --tag mar18
+python agent.py --model gemini-3.1-flash-preview --tag mar18
+or
+python agent.py --model gemini-3.1-pro-preview --tag mar18
 ```
+gemini-3.1-flash-preview is recommended here, for this application the price/performance ratio is superior.
 
 **Anthropic via OpenAI SDK compatibility**
 
@@ -515,6 +516,24 @@ python agent.py --tag mar18
 # Crypto (more volatile market)
 python agent.py --tag mar18-crypto --tickers BTC-USD ETH-USD XRP-USD ADA-USD --quick
 ```
+
+**OpenAI API**
+
+```bash
+export OPENAI_API_KEY=your_openai_key
+
+# Best value hosted option for coding / subagent work
+python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4-mini --tag mar18
+
+# Quality-first hosted option
+python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4-mini --tag mar18
+or
+python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4 --tag mar18
+```
+OpenAI announced GPT-5.4 mini as a major upgrade over GPT-5 mini for coding,
+tool use, and subagent workflows while remaining much faster than the full
+flagship model.  If your account exposes a snapshot or provider-specific alias
+instead of the short name above, pass that exact model id via `--model`.
 
 ### 3. Monitor progress
 

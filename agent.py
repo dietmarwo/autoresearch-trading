@@ -20,7 +20,7 @@ Usage:
     python agent.py --base-url http://host:8011/v1
     python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4-mini
     python agent.py --model claude-sonnet-4-6
-    python agent.py --model gemini-3.1-pro
+    python agent.py --model gemini-3.1-pro-preview
 """
 
 import os
@@ -54,7 +54,7 @@ RUN_TIMEOUT = 900            # 15 min max per walk-forward run
 MAX_CONTEXT_EXCHANGES = 2    # keep last N exchanges (lightweight, no code duplication)
 TOP_K = 10                   # curated best/diverse experiments shown to LLM
 RECENT_K = 10                # recent experiments shown to LLM
-TEMPERATURE = 0.7
+TEMPERATURE = 0.85
 REFERENCE_CODE_CHARS = 3500  # keep discarded-code references compact for 50K context
 MAX_LLM_OUTPUT_TOKENS = 8192
 
@@ -485,6 +485,8 @@ def pick_llm_backend(model_name: Optional[str], base_url: Optional[str]) -> str:
         return "claude"
     if "gemini" in model and is_local_base_url(base_url):
         return "gemini"
+    if "minimax" in model and is_local_base_url(base_url):
+        return "minimax"
     return "openai"
 
 
@@ -494,6 +496,8 @@ def resolve_api_key(base_url: str) -> str:
         return os.environ["OPENAI_API_KEY"]
     if "anthropic.com" in base_url and os.environ.get("ANTHROPIC_API_KEY"):
         return os.environ["ANTHROPIC_API_KEY"]
+    if "minimax.io" in base_url and os.environ.get("MINIMAX_API_KEY"):
+        return os.environ["MINIMAX_API_KEY"]
     return "dummy"
 
 
@@ -541,6 +545,64 @@ def extract_anthropic_text(response) -> str:
             return block_text.strip()
     return ""
 
+def call_minimax_native(system_prompt: str, user_prompt: str, model_id: str,
+                        temperature: float = TEMPERATURE) -> str:
+    """Call MiniMax's API using the Anthropic SDK compatibility layer."""
+    try:
+        import anthropic  # type: ignore
+    except ImportError:
+        print("  [LLM ERROR] MiniMax support via Anthropic requires the 'anthropic' package.")
+        print("  Install with: pip install anthropic")
+        return ""
+
+    # Look for the MiniMax key specifically
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    if not api_key:
+        print("  [LLM ERROR] MINIMAX_API_KEY is not set.")
+        return ""
+
+    try:
+        # The crucial step: Redirect the Claude SDK to MiniMax's servers
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url="https://api.minimax.io/anthropic" 
+        )
+        
+        request = dict(
+            model=model_id, # e.g., "MiniMax-M2.7"
+            max_tokens=MAX_LLM_OUTPUT_TOKENS, 
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+            temperature=temperature,
+        )
+        
+        try:
+            # Try passing Claude's thinking block. MiniMax's compatibility layer 
+            # might gracefully accept it, or it might reject it.
+            response = client.messages.create(
+                **request,
+                thinking={"type": "adaptive", "effort": "high"},
+            )
+            if hasattr(response, "usage") and response.usage:
+                u = response.usage
+                total = u.input_tokens + u.output_tokens
+                print(f"  [USAGE] Total: {total} | Prompt: {u.input_tokens} | Output: {u.output_tokens} (Thinking included in Output)")
+        except Exception as e:
+            # Safe Fallback: If MiniMax's endpoint rejects the explicit 'thinking' kwargs,
+            # strip them out. M2.7 is naturally agentic and will "think" regardless!
+            error_str = str(e).lower()
+            if any(token in error_str for token in ("thinking", "adaptive", "effort", "unrecognized")):
+                response = client.messages.create(**request)
+            else:
+                raise
+                
+        # Because MiniMax mimics Claude, your existing extractor will work perfectly
+        return extract_anthropic_text(response)
+        
+    except Exception as e:
+        print(f"  [LLM ERROR] {e}")
+        return ""
+    
 
 def call_claude_native(system_prompt: str, user_prompt: str, model_id: str,
                        temperature: float = TEMPERATURE) -> str:
@@ -571,6 +633,10 @@ def call_claude_native(system_prompt: str, user_prompt: str, model_id: str,
                 **request,
                 thinking={"type": "adaptive", "effort": "high"},
             )
+            if hasattr(response, "usage") and response.usage:
+                u = response.usage
+                total = u.input_tokens + u.output_tokens
+                print(f"  [USAGE] Total: {total} | Prompt: {u.input_tokens} | Output: {u.output_tokens} (Thinking included in Output)")
         except Exception as e:
             # Some Claude models/endpoints may not accept thinking controls.
             if any(token in str(e).lower() for token in ("thinking", "adaptive", "effort")):
@@ -614,7 +680,12 @@ def call_gemini_native(system_prompt: str, user_prompt: str, model_id: str,
                 model=model_id,
                 contents=user_prompt,
                 config=config,
-            )
+            )                 
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                u = response.usage_metadata
+                thinking = getattr(u, 'thoughts_token_count', 0)
+                print(f"  [USAGE] Total: {u.total_token_count} | Prompt: {u.prompt_token_count} | Output: {u.candidates_token_count} (Thinking: {thinking})")
+                
         except Exception as e:
             # Fallback if the installed SDK/model does not expose thinking controls.
             if any(token in str(e).lower() for token in ("thinking", "thinking_level")):
@@ -724,10 +795,16 @@ def call_llm(messages: list, args, client: Optional[OpenAI] = None,
                                   model_id or args.model or "claude-sonnet-4-6",
                                   temperature)
 
+    if backend == "minimax":
+        system_prompt, user_prompt = flatten_messages_for_native(messages)
+        return call_minimax_native(system_prompt, user_prompt,
+                                  model_id or args.model or "MiniMax-M2.7",
+                                  temperature)
+
     if backend == "gemini":
         system_prompt, user_prompt = flatten_messages_for_native(messages)
         return call_gemini_native(system_prompt, user_prompt,
-                                  model_id or args.model or "gemini-3.1-pro",
+                                  model_id or args.model or "gemini-3.1-flash-preview",
                                   temperature)
 
     if client is None:
@@ -741,6 +818,12 @@ def call_llm(messages: list, args, client: Optional[OpenAI] = None,
             temperature=temperature,
             max_tokens=MAX_LLM_OUTPUT_TOKENS,
         )
+        if hasattr(response, "usage") and response.usage:
+            u = response.usage
+            details = getattr(u, "completion_tokens_details", None)
+            thinking = getattr(details, "reasoning_tokens", 0) if details else 0
+            print(f"  [USAGE] Total: {u.total_tokens} | Prompt: {u.prompt_tokens} | Output: {u.completion_tokens} (Thinking: {thinking})")
+
         return response.choices[0].message.content or ""
     except Exception as e:
         print(f"  [LLM ERROR] {e}")
@@ -1651,7 +1734,7 @@ def main():
     parser.add_argument("--base-url", default="http://127.0.0.1:8011/v1",
                         help="OpenAI-compatible API base URL (ignored by native Claude/Gemini unless you point to a remote compatible endpoint)")
     parser.add_argument("--model", default=None,
-                        help="Model id. Names containing 'claude' or 'gemini' use native SDKs on local/default base URLs; otherwise use the OpenAI-compatible API")
+                        help="Model id. Names containing 'claude' or 'gemini' or 'MiniMax' use native SDKs on local/default base URLs; otherwise use the OpenAI-compatible API")
     parser.add_argument("--tag", default=None,
                         help="Branch tag (e.g. mar18). Creates autoresearch/<tag>")
     parser.add_argument("--quick", action="store_true",
