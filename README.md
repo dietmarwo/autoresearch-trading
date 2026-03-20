@@ -55,6 +55,13 @@ This project splits the problem at the right seam:
 This gives the AI a much cleaner signal than end-to-end autoresearch. 
 A bad score here definitively means the architecture change was bad, not just poorly tuned.
 
+A typical run looks like this:
+
+![Example agent progress over time and per cycle](img/progress.png)
+
+The diagram shows both views of the search: progress over wall-clock time and
+progress per experiment cycle.
+
 The core idea: **separate strategy structure from parameter tuning**.  An AI agent
 designs the trading logic — which indicators to use, when to buy and sell, how to
 size positions.  A conventional optimiser
@@ -341,10 +348,11 @@ EMA/SMA crossover strategy, and prints the SCORE.
 
 ### 2. Start the autonomous agent
 
-The agent requires a local LLM served via an OpenAI-compatible API.  We
-recommend [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`
-with a Qwen3.5-35B MoE model — it produces good strategy code while being
-small enough to run on a single GPU.
+The agent works with local LLMs served via an OpenAI-compatible API and can
+also call native Claude or Gemini APIs directly.  We recommend
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` with a
+Qwen3.5-35B MoE model for local runs — it produces good strategy code while
+being small enough to run on a single GPU.
 
 If raw strategy quality matters more than local inference cost or privacy,
 hosted frontier models are currently the better default for this project.
@@ -357,7 +365,7 @@ positioned for stronger coding and agentic work than their predecessors.
 | Best local quality | `Reasoning/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF:Q8_0` | Better strategy design and reasoning than the faster local Qwen MoE, but much slower per experiment |
 | Hosted best value | `gpt-5.4-mini` | Strong coding and agentic quality with much lower latency and cost than flagship hosted models |
 | Hosted quality-first | `gpt-5.4` | Best OpenAI choice here when you want stronger agentic coding and are willing to pay for it |
-| Hosted Anthropic option | `claude-sonnet-4-6` | Strong agent planning, coding, and long-context performance with an OpenAI-compatible endpoint path |
+| Hosted Anthropic option | `claude-sonnet-4-6` | Strong agent planning, coding, and long-context performance; native API path is supported directly |
 
 **Minimum hardware: NVIDIA RTX 5060 Ti 16GB** (or equivalent 16GB VRAM GPU):
 
@@ -436,7 +444,7 @@ APIs.
 **Hosted API alternatives**
 
 If you want higher-quality strategy proposals than a local 27B-35B model can
-usually deliver, the easiest upgrade path is a hosted OpenAI-compatible API.
+usually deliver, the easiest upgrade path is a hosted frontier API.
 
 **OpenAI API**
 
@@ -455,21 +463,41 @@ tool use, and subagent workflows while remaining much faster than the full
 flagship model.  If your account exposes a snapshot or provider-specific alias
 instead of the short name above, pass that exact model id via `--model`.
 
+**Anthropic native API**
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=your_anthropic_key
+
+# Native Anthropic SDK path
+python agent.py --model claude-sonnet-4-6 --tag mar18
+```
+
+Claude Sonnet 4.6 is Anthropic's most capable Sonnet model so far, with
+explicit improvements in coding, computer use, long-context reasoning, and
+agent planning.
+
+**Gemini native API**
+
+```bash
+pip install google-genai
+export GEMINI_API_KEY=your_gemini_key
+
+python agent.py --model gemini-3.1-pro --tag mar18
+```
+
 **Anthropic via OpenAI SDK compatibility**
 
 ```bash
 export ANTHROPIC_API_KEY=your_anthropic_key
 
-# Drop-in Anthropic endpoint for the current OpenAI-based agent
+# Compatibility path still works if you prefer a single OpenAI-style client
 python agent.py --base-url https://api.anthropic.com/v1/ --model claude-sonnet-4-6 --tag mar18
 ```
 
-The agent will automatically use `ANTHROPIC_API_KEY` when the base URL points
-at Anthropic.  Anthropic documents this compatibility layer as useful for
-testing and comparison, while recommending the native Anthropic API for
-production use.  Claude Sonnet 4.6 is Anthropic's most capable Sonnet model so
-far, with explicit improvements in coding, computer use, long-context
-reasoning, and agent planning.
+When the base URL points at Anthropic, the agent will automatically use
+`ANTHROPIC_API_KEY` for the compatibility path.  Native Claude and Gemini
+imports are optional and are only needed when you use those model families.
 
 Then run the agent:
 

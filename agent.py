@@ -2,8 +2,9 @@
 """
 agent.py — Autonomous trading strategy researcher.
 
-Connects to a local LLM (llama-server / OpenAI-compatible API) and runs
-the experiment loop from program_trade.md:
+Connects to a local LLM (llama-server / OpenAI-compatible API) or native
+frontier APIs (Claude/Gemini) and runs the experiment loop from
+program_trade.md:
 
   1. LLM proposes a new strategy.py
   2. Runner validates syntax, commits, runs walk-forward
@@ -18,6 +19,8 @@ Usage:
     python agent.py --tickers BTC-USD ETH-USD XRP-USD ADA-USD  # crypto
     python agent.py --base-url http://host:8011/v1
     python agent.py --base-url https://api.openai.com/v1 --model gpt-5.4-mini
+    python agent.py --model claude-sonnet-4-6
+    python agent.py --model gemini-3.1-pro
 """
 
 import os
@@ -53,6 +56,7 @@ TOP_K = 10                   # curated best/diverse experiments shown to LLM
 RECENT_K = 10                # recent experiments shown to LLM
 TEMPERATURE = 0.7
 REFERENCE_CODE_CHARS = 3500  # keep discarded-code references compact for 50K context
+MAX_LLM_OUTPUT_TOKENS = 8192
 
 # Resolved at startup — the directory containing agent.py, strategy.py, trading.py
 PROJECT_DIR: Path = Path(__file__).resolve().parent
@@ -466,6 +470,24 @@ class AgentState:
 #  LLM interaction
 # ═══════════════════════════════════════════════════════════════════════════
 
+def is_local_base_url(base_url: Optional[str]) -> bool:
+    """Return True for local/default OpenAI-compatible endpoints."""
+    if not base_url:
+        return True
+    base = base_url.lower()
+    return "127.0.0.1" in base or "localhost" in base
+
+
+def pick_llm_backend(model_name: Optional[str], base_url: Optional[str]) -> str:
+    """Choose between OpenAI-compatible and native provider SDKs."""
+    model = (model_name or "").lower()
+    if "claude" in model and is_local_base_url(base_url):
+        return "claude"
+    if "gemini" in model and is_local_base_url(base_url):
+        return "gemini"
+    return "openai"
+
+
 def resolve_api_key(base_url: str) -> str:
     """Resolve API key for the selected endpoint."""
     if os.environ.get("OPENAI_API_KEY"):
@@ -485,6 +507,129 @@ def pick_model_id(client: OpenAI, requested_model: Optional[str] = None) -> str:
     except Exception as e:
         print(f"  [WARN] Could not list models ({e}); using provider default")
         return "default"
+
+
+def flatten_messages_for_native(messages: list) -> tuple[str, str]:
+    """Convert OpenAI-style messages into a system prompt and a transcript."""
+    system_prompt = ""
+    transcript = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system" and not system_prompt:
+            system_prompt = str(content)
+            continue
+        label = "Assistant" if role == "assistant" else "User"
+        transcript.append(f"{label}:\n{content}")
+    return system_prompt, "\n\n".join(transcript).strip()
+
+
+def extract_anthropic_text(response) -> str:
+    """Extract plain text from an Anthropic response."""
+    blocks = getattr(response, "content", None) or []
+    text_parts = []
+    for block in blocks:
+        block_type = getattr(block, "type", "")
+        block_text = getattr(block, "text", "")
+        if block_type == "text" and block_text:
+            text_parts.append(block_text)
+    if text_parts:
+        return "\n".join(text_parts).strip()
+    for block in reversed(blocks):
+        block_text = getattr(block, "text", "")
+        if block_text:
+            return block_text.strip()
+    return ""
+
+
+def call_claude_native(system_prompt: str, user_prompt: str, model_id: str,
+                       temperature: float = TEMPERATURE) -> str:
+    """Call Anthropic's native SDK with lazy optional import."""
+    try:
+        import anthropic  # type: ignore
+    except ImportError:
+        print("  [LLM ERROR] Claude support requires the optional 'anthropic' package.")
+        print("  Install with: pip install anthropic")
+        return ""
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("  [LLM ERROR] ANTHROPIC_API_KEY is not set.")
+        return ""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        request = dict(
+            model=model_id,
+            max_tokens=MAX_LLM_OUTPUT_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+            temperature=temperature,
+        )
+        try:
+            response = client.messages.create(
+                **request,
+                thinking={"type": "adaptive", "effort": "high"},
+            )
+        except Exception as e:
+            # Some Claude models/endpoints may not accept thinking controls.
+            if any(token in str(e).lower() for token in ("thinking", "adaptive", "effort")):
+                response = client.messages.create(**request)
+            else:
+                raise
+        return extract_anthropic_text(response)
+    except Exception as e:
+        print(f"  [LLM ERROR] {e}")
+        return ""
+
+
+def call_gemini_native(system_prompt: str, user_prompt: str, model_id: str,
+                       temperature: float = TEMPERATURE) -> str:
+    """Call Google's native Gemini SDK with lazy optional import."""
+    try:
+        from google import genai  # type: ignore
+        from google.genai import types  # type: ignore
+    except ImportError:
+        print("  [LLM ERROR] Gemini support requires the optional 'google-genai' package.")
+        print("  Install with: pip install google-genai")
+        return ""
+
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        print("  [LLM ERROR] GEMINI_API_KEY or GOOGLE_API_KEY is not set.")
+        return ""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        config_kwargs = dict(
+            system_instruction=system_prompt,
+            temperature=temperature,
+        )
+        try:
+            config = types.GenerateContentConfig(
+                **config_kwargs,
+                thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+            )
+            response = client.models.generate_content(
+                model=model_id,
+                contents=user_prompt,
+                config=config,
+            )
+        except Exception as e:
+            # Fallback if the installed SDK/model does not expose thinking controls.
+            if any(token in str(e).lower() for token in ("thinking", "thinking_level")):
+                config = types.GenerateContentConfig(**config_kwargs)
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=user_prompt,
+                    config=config,
+                )
+            else:
+                raise
+        return (getattr(response, "text", "") or "").strip()
+    except Exception as e:
+        print(f"  [LLM ERROR] {e}")
+        return ""
 
 
 def build_user_message(state: AgentState, top_k: int = TOP_K,
@@ -567,15 +712,34 @@ def extract_description(response_text: str) -> str:
     return "no description"
 
 
-def call_llm(client: OpenAI, model_id: str, messages: list,
-             temperature: float = 0.7) -> str:
-    """Call the LLM and return the response text."""
+def call_llm(messages: list, args, client: Optional[OpenAI] = None,
+             model_id: Optional[str] = None) -> str:
+    """Call the configured LLM backend and return the response text."""
+    backend = pick_llm_backend(model_id or args.model, args.base_url)
+    temperature = getattr(args, "temperature", TEMPERATURE)
+
+    if backend == "claude":
+        system_prompt, user_prompt = flatten_messages_for_native(messages)
+        return call_claude_native(system_prompt, user_prompt,
+                                  model_id or args.model or "claude-sonnet-4-6",
+                                  temperature)
+
+    if backend == "gemini":
+        system_prompt, user_prompt = flatten_messages_for_native(messages)
+        return call_gemini_native(system_prompt, user_prompt,
+                                  model_id or args.model or "gemini-3.1-pro",
+                                  temperature)
+
+    if client is None:
+        print("  [LLM ERROR] OpenAI-compatible backend selected without a client.")
+        return ""
+
     try:
         response = client.chat.completions.create(
-            model=model_id,
+            model=model_id or "default",
             messages=messages,
             temperature=temperature,
-            max_tokens=8192,
+            max_tokens=MAX_LLM_OUTPUT_TOKENS,
         )
         return response.choices[0].message.content or ""
     except Exception as e:
@@ -1128,11 +1292,20 @@ def run_agent(args):
 
     # --- Connect to LLM ---
     base_url = args.base_url
-    api_key = resolve_api_key(base_url)
-    client = OpenAI(base_url=base_url, api_key=api_key)
-    model_id = pick_model_id(client, args.model)
+    backend = pick_llm_backend(args.model, base_url)
     temperature = getattr(args, 'temperature', TEMPERATURE)
-    print(f"Connected to LLM: {model_id} at {base_url} (temp={temperature})")
+    client: Optional[OpenAI] = None
+    model_id = args.model
+
+    if backend == "openai":
+        api_key = resolve_api_key(base_url)
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        model_id = pick_model_id(client, args.model)
+        print(f"Connected to LLM: {model_id} at {base_url} (temp={temperature})")
+    else:
+        model_id = args.model or ("claude-sonnet-4-6" if backend == "claude"
+                                  else "gemini-3.1-pro")
+        print(f"Connected to native {backend} client: {model_id} (temp={temperature})")
 
     # --- Always start from a clean state ---
     # Copy base_strategy.py → strategy.py so we have a known-good baseline,
@@ -1215,7 +1388,7 @@ def run_agent(args):
             messages = conv.messages(user_msg)
 
             print("  Asking LLM for next strategy...")
-            response_text = call_llm(client, model_id, messages, temperature)
+            response_text = call_llm(messages, args, client=client, model_id=model_id)
 
             if not response_text:
                 print("  [WARN] Empty LLM response, retrying in 5s...")
@@ -1246,7 +1419,7 @@ def run_agent(args):
                 fix_msg = (f"Syntax error in your strategy.py:\n{syntax_err}\n\n"
                            f"Fix it and output the complete corrected file.")
                 fix_messages = conv.messages(fix_msg)
-                fix_response = call_llm(client, model_id, fix_messages, temperature)
+                fix_response = call_llm(fix_messages, args, client=client, model_id=model_id)
                 code = extract_strategy_code(fix_response)
                 code = fix_strategy_code(code) if code else code
                 if code is None or validate_syntax(code):
@@ -1291,7 +1464,7 @@ def run_agent(args):
                 # Ask LLM to fix
                 fix_msg = build_crash_message(pf_err, preflight_attempts)
                 fix_messages = conv.messages(fix_msg)
-                fix_response = call_llm(client, model_id, fix_messages, temperature)
+                fix_response = call_llm(fix_messages, args, client=client, model_id=model_id)
                 fix_code = extract_strategy_code(fix_response)
                 if fix_code:
                     fix_code = fix_strategy_code(fix_code)
@@ -1354,7 +1527,7 @@ def run_agent(args):
             # Ask LLM to fix the crash
             crash_msg = build_crash_message(run_result["error"], crash_count)
             crash_messages = conv.messages(crash_msg)
-            fix_response = call_llm(client, model_id, crash_messages, temperature)
+            fix_response = call_llm(crash_messages, args, client=client, model_id=model_id)
             fix_code = extract_strategy_code(fix_response)
             if fix_code:
                 fix_code = fix_strategy_code(fix_code)
@@ -1476,9 +1649,9 @@ def main():
     parser.add_argument("--project-dir", default=None,
                         help="Project directory (default: directory containing agent.py)")
     parser.add_argument("--base-url", default="http://127.0.0.1:8011/v1",
-                        help="OpenAI-compatible API base URL")
+                        help="OpenAI-compatible API base URL (ignored by native Claude/Gemini unless you point to a remote compatible endpoint)")
     parser.add_argument("--model", default=None,
-                        help="Explicit model id for the selected API endpoint")
+                        help="Model id. Names containing 'claude' or 'gemini' use native SDKs on local/default base URLs; otherwise use the OpenAI-compatible API")
     parser.add_argument("--tag", default=None,
                         help="Branch tag (e.g. mar18). Creates autoresearch/<tag>")
     parser.add_argument("--quick", action="store_true",
