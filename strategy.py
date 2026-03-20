@@ -1,108 +1,96 @@
+# strategy.py — THE FILE THE AI AGENT EDITS
+#
+# This is the equivalent of Karpathy's train.py for autoresearch.
+# The framework imports get_strategy() and plugs it into walk-forward
+# evaluation.  The AI agent modifies this file to propose new strategies.
+#
+# Contract:
+#   get_strategy() returns a dict with:
+#     name       : str               — human-readable strategy name
+#     variables  : list[str]         — parameter names (for logging)
+#     bounds     : (list, list)      — (lower_bounds, upper_bounds)
+#     simulate   : callable          — see signature below
+#
+#   simulate(close, high, low, volume, x) -> (growth_factor, num_trades)
+#     close  : np.ndarray float64   — daily close prices
+#     high   : np.ndarray float64   — daily high prices
+#     low    : np.ndarray float64   — daily low prices
+#     volume : np.ndarray float64   — daily volume
+#     x      : np.ndarray float64   — decision variables from optimizer
+#     returns: (float, int)         — (cash / start_cash, number_of_trades)
+#
+# Rules for the AI agent:
+#   1. get_strategy() must be importable and return the dict above.
+#   2. simulate() must be fast — use @njit for the inner trading loop.
+#   3. simulate() receives NUMPY arrays only (no pandas).
+#   4. The optimizer minimizes; framework negates factor, so higher = better.
+#   5. Use: from strategy_helpers import *
+#   6. You may define as many internal helper functions as needed.
+#   7. All decision variables are continuous floats — cast to int inside
+#      simulate() where needed (e.g., window sizes).
+#   8. Keep variable count reasonable (4–15). More variables = harder to
+#      optimise, more prone to overfit.
+
 import numpy as np
 from numba import njit
 from strategy_helpers import *
 
+# ---------------------------------------------------------------------------
+#  Strategy definition
+# ---------------------------------------------------------------------------
+
 def get_strategy() -> dict:
     return dict(
-        name="ema_sma_adx_momentum_v2",
-        variables=["ema_period", "sma_period", "adx_period", "atr_period", 
-                   "atr_mult", "adx_threshold", "roc_period", "cmf_period",
-                   "wait_buy", "wait_sell"],
-        bounds=([20, 40, 10, 10, 0.5, 20, 5, 10, 10, 50],
-                [60, 100, 30, 30, 2.5, 35, 20, 30, 150, 200]),
+        name="ema_sma_crossover_v1",
+        variables=["ema_period", "sma_period", "wait_buy", "wait_sell"],
+        bounds=([20, 50, 10, 10],
+                [50, 100, 200, 200]),
         simulate=simulate,
     )
 
-def simulate(close, high, low, volume, x):
-    ema_period = max(int(x[0]), 1)
-    sma_period = max(int(x[1]), 1)
-    adx_period = max(int(x[2]), 1)
-    atr_period = max(int(x[3]), 1)
-    atr_mult = float(x[4])
-    adx_threshold = float(x[5])
-    roc_period = max(int(x[6]), 1)
-    cmf_period = max(int(x[7]), 1)
-    wait_buy = int(x[8])
-    wait_sell = int(x[9])
-    
+# ---------------------------------------------------------------------------
+#  Simulation entry point (regular Python — bridges numpy prep and numba)
+# ---------------------------------------------------------------------------
+
+def simulate(close: np.ndarray, high: np.ndarray, low: np.ndarray,
+             volume: np.ndarray, x: np.ndarray) -> tuple:
+    """
+    Compute indicators, then delegate to the numba-compiled trading loop.
+    This function is called ~10k+ times per optimisation window, so keep
+    indicator computation efficient (numpy only, no pandas).
+    """
+    ema_period = int(x[0])
+    sma_period = int(x[1])
     ema = ema_np(close, ema_period)
     sma = sma_np(close, sma_period)
-    adx_result = adx_np(high, low, close, adx_period)
-    adx, pdi, mdi = adx_result[0], adx_result[1], adx_result[2]
-    atr = atr_np(high, low, close, atr_period)
-    roc = roc_np(close, roc_period)
-    cmf = cmf_np(high, low, close, volume, cmf_period)
-    
-    return _execute(close, 1_000_000.0, ema, sma, adx, pdi, mdi, atr,
-                    roc, cmf, atr_mult, adx_threshold,
-                    wait_buy, wait_sell)
+    return _execute(close, 1_000_000.0, ema, sma, int(x[2]), int(x[3]))
+
+# ---------------------------------------------------------------------------
+#  Numba-compiled trading loop (the hot path)
+# ---------------------------------------------------------------------------
 
 @njit(fastmath=True)
-def _execute(close, start_cash, ema, sma, adx, pdi, mdi, atr,
-             roc, cmf, atr_mult, adx_threshold, wait_buy, wait_sell):
+def _execute(close, start_cash, ema, sma, wait_buy, wait_sell):
     cash = start_cash
     num_coins = 0
     last_trade = 0
     num_trades = 0
-    peak = 0.0
-    
+
     for i in range(len(close)):
-        # Skip NaN values from indicators
-        if np.isnan(ema[i]) or np.isnan(sma[i]) or np.isnan(adx[i]) or np.isnan(roc[i]) or np.isnan(cmf[i]):
+        c_ema = ema[i]; c_sma = sma[i]; price = close[i]
+        if np.isnan(c_ema) or np.isnan(c_sma):
             continue
-        
-        price = close[i]
-        
-        # Track peak price for trailing stop
-        if num_coins > 0 and price > peak:
-            peak = price
-        
-        # TRAILING STOP: Exit if price drops from peak by ATR-based threshold
-        # Only trigger if position has some profit buffer (price > peak * 0.98)
-        if num_coins > 0 and peak > 0:
-            profit_buffer = peak * 0.98
-            if price >= profit_buffer:
-                stop_price = peak * (1.0 - atr_mult * atr[i] / peak)
-                if price <= stop_price:
-                    cash, num_coins = sell_all(cash, num_coins, price)
-                    last_trade = i
-                    num_trades += 1
-                    peak = 0.0
-        
-        # BUY signals: Multiple confirmations required
-        # 1. EMA > SMA (trend up)
-        # 2. ADX > threshold (strong trend)
-        # 3. PDI > MDI (directional confirmation - bulls in control)
-        # 4. ROC > 0 (momentum positive)
-        # 5. CMF > 0 (volume supports price)
-        # 6. Cooldown period since last trade
-        if num_coins == 0:
-            trend_up = ema[i] > sma[i]
-            strong_trend = adx[i] > adx_threshold
-            directional = pdi[i] > mdi[i]
-            momentum = roc[i] > 0.0
-            volume_support = cmf[i] > 0.0
-            cooldown = i > last_trade + wait_buy
-            
-            if trend_up and strong_trend and directional and momentum and volume_support and cooldown:
-                cash, num_coins = buy_all(cash, num_coins, price)
-                last_trade = i
-                num_trades += 1
-                peak = price
-        
-        # SELL signals: Trend reversal + cooldown
-        # 1. EMA < SMA (trend down)
-        # 2. Longer cooldown to let winners run
-        elif num_coins > 0:
-            trend_down = ema[i] < sma[i]
-            cooldown_sell = i > last_trade + wait_sell
-            
-            if trend_down and cooldown_sell:
-                cash, num_coins = sell_all(cash, num_coins, price)
-                last_trade = i
-                num_trades += 1
-                peak = 0.0
-    
-    # Force-sell at end to realize final P&L
+        # buy when EMA crosses above SMA, respecting cooldown
+        if num_coins == 0 and c_ema > c_sma and i > last_trade + wait_buy:
+            cash, num_coins = buy_all(cash, num_coins, price)
+            last_trade = i
+            num_trades += 1
+        # sell when EMA crosses below SMA, respecting cooldown
+        elif num_coins > 0 and c_ema < c_sma and i > last_trade + wait_sell:
+            cash, num_coins = sell_all(cash, num_coins, price)
+            last_trade = i
+            num_trades += 1
+
+    # force-sell at end
     cash, num_coins = sell_all(cash, num_coins, close[-1])
     return cash / start_cash, num_trades
