@@ -54,7 +54,7 @@ RUN_TIMEOUT = 900            # 15 min max per walk-forward run
 MAX_CONTEXT_EXCHANGES = 2    # keep last N exchanges (lightweight, no code duplication)
 TOP_K = 10                   # curated best/diverse experiments shown to LLM
 RECENT_K = 10                # recent experiments shown to LLM
-TEMPERATURE = 0.85
+TEMPERATURE = 0.7
 REFERENCE_CODE_CHARS = 3500  # keep discarded-code references compact for 50K context
 MAX_LLM_OUTPUT_TOKENS = 8192
 
