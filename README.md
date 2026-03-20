@@ -363,9 +363,13 @@ positioned for stronger coding and agentic work than their predecessors.
 |---|---|---|
 | Cheapest local baseline | `unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL` | Runs on a 16GB-class local GPU and is good enough to get the loop working end-to-end |
 | Best local quality | `Reasoning/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF:Q8_0` | Better strategy design and reasoning than the faster local Qwen MoE, but much slower per experiment |
+| Hosted Anthropic | `claude-sonnet-4-6` | Good price / quality / performance mix |
+| Hosted Anthropic | `claude-opus-4-6` | Strong agent planning, coding, and long-context performance, but slow and expensive |
+| Hosted Gemini | `gemini-pro-3.1` | Good price / quality / performance mix  |
+| Hosted Gemini | `gemini-flash-3.1` | fast and cheap |
 | Hosted best value | `gpt-5.4-mini` | Strong coding and agentic quality with much lower latency and cost than flagship hosted models |
 | Hosted quality-first | `gpt-5.4` | Best OpenAI choice here when you want stronger agentic coding and are willing to pay for it |
-| Hosted Anthropic option | `claude-sonnet-4-6` | Strong agent planning, coding, and long-context performance; native API path is supported directly |
+
 
 **Minimum hardware: NVIDIA RTX 5060 Ti 16GB** (or equivalent 16GB VRAM GPU):
 
