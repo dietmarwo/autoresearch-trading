@@ -581,7 +581,7 @@ def call_minimax_native(system_prompt: str, user_prompt: str, model_id: str,
             # might gracefully accept it, or it might reject it.
             response = client.messages.create(
                 **request,
-                thinking={"type": "adaptive", "effort": "high"},
+                output_config={"effort": "high"},
             )
             if hasattr(response, "usage") and response.usage:
                 u = response.usage
@@ -631,7 +631,7 @@ def call_claude_native(system_prompt: str, user_prompt: str, model_id: str,
         try:
             response = client.messages.create(
                 **request,
-                thinking={"type": "adaptive", "effort": "high"},
+                output_config={"effort": "high"},
             )
             if hasattr(response, "usage") and response.usage:
                 u = response.usage
