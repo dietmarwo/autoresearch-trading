@@ -481,6 +481,8 @@ def is_local_base_url(base_url: Optional[str]) -> bool:
 def pick_llm_backend(model_name: Optional[str], base_url: Optional[str]) -> str:
     """Choose between OpenAI-compatible and native provider SDKs."""
     model = (model_name or "").lower()
+    if "qwen" in model and is_local_base_url(base_url):
+        return "openai"
     if "claude" in model and is_local_base_url(base_url):
         return "claude"
     if "gemini" in model and is_local_base_url(base_url):
