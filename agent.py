@@ -329,6 +329,72 @@ class AgentState:
     best_per_ticker_alpha: str = ""                # benchmark-relative per-ticker view
     benchmark_name: str = ""                       # label for benchmark-relative stats
 
+    def recent_history(self, limit: int = 10,
+                       non_crash_only: bool = False) -> list[ExperimentResult]:
+        """Return the most recent experiments, optionally excluding crashes."""
+        history = self.history
+        if non_crash_only:
+            history = [r for r in history if r.status != "crash"]
+        return history[-limit:]
+
+    def experiments_since_keep(self) -> int:
+        """How many experiments have run since the last KEEP result."""
+        count = 0
+        for r in reversed(self.history):
+            if r.status == "keep":
+                return count
+            count += 1
+        return count
+
+    def recent_family_counts(self, limit: int = 8,
+                             non_crash_only: bool = True) -> list[tuple[str, int, int]]:
+        """
+        Count recent strategy families.
+
+        Returns tuples of (family, count, total_recent_count), sorted by count.
+        """
+        recent = self.recent_history(limit=limit, non_crash_only=non_crash_only)
+        counts = {}
+        total = 0
+        for r in recent:
+            family = r.family or infer_strategy_family(r.description, r.strategy_code)
+            if not family:
+                continue
+            counts[family] = counts.get(family, 0) + 1
+            total += 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        return [(family, count, total) for family, count in ranked]
+
+    def dominant_recent_family(self, limit: int = 8,
+                               min_count: int = 4,
+                               min_share: float = 0.6) -> Optional[tuple[str, int, int]]:
+        """Return the dominant recent family when one clearly takes over."""
+        ranked = self.recent_family_counts(limit=limit, non_crash_only=True)
+        if not ranked:
+            return None
+        family, count, total = ranked[0]
+        if family == "misc":
+            return None
+        if total < min_count:
+            return None
+        if count < min_count:
+            return None
+        if (count / max(total, 1)) < min_share:
+            return None
+        return family, count, total
+
+    def recent_failure_signals(self, limit: int = 8) -> dict:
+        """Summarize common recent failure modes for adaptive prompting."""
+        recent = self.recent_history(limit=limit, non_crash_only=False)
+        return {
+            "flat": sum("flat/no-trade" in r.description.lower() for r in recent),
+            "crashes": sum(r.status == "crash" for r in recent),
+            "pos_growth_neg_score": sum(
+                r.status != "crash" and r.growth > 0 and r.score < 0
+                for r in recent
+            ),
+        }
+
     def _format_experiment(self, r, label: str = "") -> str:
         """Format one experiment result for display."""
         folds_per_year = self.bars_per_year / DEFAULT_TEST_DAYS
@@ -799,9 +865,110 @@ def is_exploration_turn(state: AgentState, explore_every: int = EXPLORE_EVERY) -
     return explore_every > 0 and len(state.history) > 0 and len(state.history) % explore_every == 0
 
 
+def should_force_exploration(state: AgentState,
+                             explore_every: int = EXPLORE_EVERY) -> bool:
+    """
+    Force exploration when the search is plateauing inside one dominant family.
+
+    This helps models that over-refine one near-miss family instead of making
+    a bigger structural jump.
+    """
+    if not state.history:
+        return False
+    plateau = state.experiments_since_keep()
+    dominant = state.dominant_recent_family(limit=max(8, explore_every + 2))
+    if plateau >= max(4, explore_every) and dominant:
+        return True
+
+    signals = state.recent_failure_signals(limit=max(8, explore_every + 2))
+    if plateau >= max(6, explore_every + 2) and signals["flat"] >= 2:
+        return True
+
+    return False
+
+
+def build_adaptive_guidance(state: AgentState, model_name: str = "",
+                            exploration_mode: bool = False) -> str:
+    """Inject steering based on recent search behavior and model tendencies."""
+    notes = []
+    plateau = state.experiments_since_keep()
+    dominant = state.dominant_recent_family(limit=8)
+    family_counts = state.recent_family_counts(limit=8, non_crash_only=True)
+    signals = state.recent_failure_signals(limit=8)
+    model = (model_name or "").lower()
+
+    if plateau >= 4:
+        notes.append(f"- Plateau: no KEEP for {plateau} experiments.")
+
+    repeated_families = [f"`{family}` x{count}"
+                         for family, count, total in family_counts[:2]
+                         if family != "misc" and count >= 2]
+    if repeated_families:
+        notes.append("- Recent family mix: " + ", ".join(repeated_families) + ".")
+
+    if dominant:
+        family, count, total = dominant
+        notes.append(
+            f"- Family lock-in: `{family}` appeared in {count}/{total} recent non-crash runs."
+        )
+        if exploration_mode or plateau >= 4:
+            notes.append(
+                f"- On this turn, avoid another minor `{family}` variant. "
+                "Change the primary entry family or the exit architecture."
+            )
+
+    if signals["pos_growth_neg_score"] >= 2:
+        notes.append(
+            "- Several recent runs had positive raw growth but still negative SCORE. "
+            "The bottleneck is volatility and/or lagging HODL, so favor fewer trades, "
+            "wider exits, slower churn, and steadier alpha."
+        )
+
+    if signals["flat"] >= 2:
+        notes.append(
+            "- Several recent runs were flat/no-trade rejects. Reduce stacked filters "
+            "and hard gates; prefer one clear trigger plus one slower regime filter."
+        )
+
+    if signals["crashes"] >= 2:
+        notes.append(
+            "- Recent crashes suggest the strategy wiring is getting fragile. Prefer "
+            "simpler indicator plumbing and fewer dependent arrays."
+        )
+
+    if "gemini" in model:
+        notes.append(
+            "- Gemini steer: favor structural jumps over tiny threshold edits when the "
+            "score plateaus."
+        )
+        if dominant:
+            notes.append(
+                "- Gemini steer: stop micro-tuning the dominant family. Replace the "
+                "core signal family instead of nudging thresholds."
+            )
+
+    if "minimax" in model:
+        notes.append(
+            "- MiniMax steer: avoid over-constraining entries with stacked confirmation "
+            "filters. A simpler edge is better than a 'safer' flat strategy."
+        )
+        if dominant:
+            notes.append(
+                "- MiniMax steer: do not add yet another small filter onto the dominant "
+                "family on this turn; use a different entry engine or a materially "
+                "different exit."
+            )
+
+    if not notes:
+        return ""
+
+    return "Adaptive guidance:\n" + "\n".join(notes)
+
+
 def build_user_message(state: AgentState, top_k: int = TOP_K,
                        recent_k: int = RECENT_K, extra: str = "",
-                       exploration_mode: bool = False) -> str:
+                       exploration_mode: bool = False,
+                       model_name: str = "") -> str:
     """Build the user message for the next iteration."""
     parts = []
 
@@ -812,6 +979,10 @@ def build_user_message(state: AgentState, top_k: int = TOP_K,
     else:
         best_family = infer_strategy_family("current best", state.current_strategy)
         parts.append(state.summary(top_k=top_k, recent_k=recent_k))
+        adaptive_guidance = build_adaptive_guidance(
+            state, model_name=model_name, exploration_mode=exploration_mode)
+        if adaptive_guidance:
+            parts.append("\n" + adaptive_guidance)
         reference_k = EXPLORE_REFERENCE_K if exploration_mode else EXPLOIT_REFERENCE_K
 
         if not exploration_mode:
@@ -1943,12 +2114,25 @@ def run_agent(args):
         else:
             this_is_initial_strategy = False
             # --- Step 1: Ask LLM for next strategy ---
-            exploration_mode = is_exploration_turn(state, args.explore_every)
-            mode_label = "EXPLORATION" if exploration_mode else "EXPLOITATION"
+            scheduled_exploration = is_exploration_turn(state, args.explore_every)
+            forced_exploration = should_force_exploration(state, args.explore_every)
+            exploration_mode = scheduled_exploration or forced_exploration
+            if forced_exploration and not scheduled_exploration:
+                dominant = state.dominant_recent_family(limit=max(8, args.recent_k))
+                if dominant:
+                    family, count, total = dominant
+                    mode_label = (f"FORCED EXPLORATION "
+                                  f"(plateau={state.experiments_since_keep()}, "
+                                  f"dominant={family} {count}/{total})")
+                else:
+                    mode_label = f"FORCED EXPLORATION (plateau={state.experiments_since_keep()})"
+            else:
+                mode_label = "EXPLORATION" if exploration_mode else "EXPLOITATION"
             print(f"  Prompt mode: {mode_label}")
             user_msg = build_user_message(
                 state, top_k=args.top_k, recent_k=args.recent_k,
-                extra=market_context, exploration_mode=exploration_mode)
+                extra=market_context, exploration_mode=exploration_mode,
+                model_name=model_id or args.model or "")
             messages = conv.messages(user_msg)
 
             print("  Asking LLM for next strategy...")
