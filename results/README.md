@@ -12,6 +12,23 @@ One important point when reading these results: beating `HODL` is much harder th
 
 That trade-off is exactly why this folder is useful as more than just a showcase of what the current agent found. The framework is really a controlled test bench for strategy ideas. The agent can be replaced by anything that produces strategy code: another LLM, an evolutionary program synthesizer, a rules engine, a template library, or simply manual human invention. If you believe there is an easier way to beat `autoresearch-trading`, the cleanest way to check is to plug in a different strategy generation method and run it through the same walk-forward evaluation. That makes this repository a fair "beat the benchmark" challenge, not just a fixed AI demo.
 
+## Warning
+
+This folder should be read as an agentic-system benchmark, not as real trading advice. The strategies here were selected because they performed well inside this research harness, not because they are ready for live capital. A good backtest, a good walk-forward score, or even a favorable Sharpe-style result does not mean a strategy is robust enough for production trading.
+
+That distinction also matches the broader AI-in-finance literature. Existing studies and surveys do report that machine learning can extract predictive structure from historical market data, but they also show that prediction quality in research datasets is not the same thing as a live, scalable, risk-controlled trading business. In practice, costs, turnover, market impact, data leakage, selection bias, and regime change often decide whether an apparently strong paper result survives contact with the real market.
+
+For real application, the limitations are serious:
+
+- The entire process is still vulnerable to backtest overfitting. Bailey, Borwein, López de Prado, and Zhu show that standard anti-overfitting procedures such as simple hold-out splits can be unreliable in investment backtests, and that high in-sample performance can easily be the result of selection bias rather than true edge.
+- The simulation ignores many real frictions that matter in live execution: commissions, fees, spread, slippage, market impact, taxes, partial fills, liquidity constraints, and operational failures. In live trading, these can be large enough to erase a paper edge.
+- Even when machine learning finds predictive structure in historical data, turning that into deployable trading profits is still difficult. Gu, Kelly, and Xiu show that machine learning can produce strong return forecasts in historical asset-pricing data, but that result does not remove the practical problems of implementation, capacity, turnover, and regime change.
+- Transaction costs matter a lot. Fieberg, Metko, Poddig, and Loy explicitly note that higher turnover can nullify raw outperformance, and they find that some machine learning gains are much less attractive once trading frictions and market liquidity are taken seriously.
+- Markets are non-stationary. A strategy learned on one period may fail when volatility, participation, monetary conditions, or market microstructure change. This is especially relevant in bull markets, where staying invested is often rewarded, but also in regime breaks where yesterday's pattern stops working.
+- The data and execution model here are simplified by design. The repository is useful for comparing strategy-generation methods under a common research protocol, but it is not a substitute for institutional-grade research, execution, monitoring, and risk control.
+
+Existing research on AI in finance is broad and growing, which is one reason this repository is interesting as a benchmark. Warin and Stojkov's systematic review maps a large academic literature on machine learning in finance, covering forecasting, prediction, and related financial applications. The right interpretation of this project is therefore: "Can your strategy-generation method produce ideas that survive this evaluation protocol better than the current one?" not "These strategies are ready to trade."
+
 ## Strategy Overview
 
 | File | Strategy | Market | Main idea | Final value | Log sharpe |
@@ -83,3 +100,11 @@ The design is meant to let strong crypto trends run while using wider, trend-awa
 - `details.json`: per-strategy fold-by-fold data used for plotting
 - `analyze_results.log`: full analyzer log
 - `*.png`: comparison charts for equity and crypto
+
+## Selected References
+
+- Bailey, David H., Jonathan M. Borwein, Marcos López de Prado, and Qiji Jim Zhu. "The Probability of Backtest Overfitting." *Journal of Computational Finance* (2016). https://ssrn.com/abstract=2326253
+- Gu, Shihao, Bryan Kelly, and Dacheng Xiu. "Empirical Asset Pricing via Machine Learning." *Review of Financial Studies* 33, no. 5 (2020): 2223-2273. https://www.nber.org/papers/w25398
+- Fieberg, Christian, Daniel Metko, Thorsten Poddig, and Thomas Loy. "Machine Learning Techniques for Cross-Sectional Equity Returns' Prediction." *OR Spectrum* 45 (2023): 289-323. https://link.springer.com/article/10.1007/s00291-022-00693-w
+- Warin, Thierry, and Aleksandar Stojkov. "Machine Learning in Finance: A Metadata-Based Systematic Review of the Literature." *Journal of Risk and Financial Management* 14, no. 7 (2021): 302. https://www.mdpi.com/1911-8074/14/7/302
+- Rundo, Francesco, Francesca Trenta, Agatino Luigi di Stallo, and Sebastiano Battiato. "Machine Learning for Quantitative Finance Applications: A Survey." *Applied Sciences* 9, no. 24 (2019): 5574. https://www.mdpi.com/2076-3417/9/24/5574
