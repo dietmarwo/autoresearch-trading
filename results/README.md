@@ -139,7 +139,7 @@ It behaves like a disciplined “buy the dip in a healthy trend” model with du
 
 ### `strategyQwenCrypto.py`
 
-This crypto strategy found by Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL by slower and more patient:
+This crypto strategy found by Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL is slower and more patient:
 
 - `ADX` is used as the main trend-strength filter
 - `EMA` helps confirm the trend
