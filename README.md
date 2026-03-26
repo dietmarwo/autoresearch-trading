@@ -702,6 +702,8 @@ This is useful when you want to answer questions like:
 - Are there degenerate parameter corners that the optimizer keeps exploiting?
 - Can the score be gamed by basket-specific behavior, extreme turnover, or
   low-volatility-but-not-economically-interesting trades?
+- Can ambiguous execution semantics, such as stop handling inside a daily bar,
+  create paper profits that are much harder or impossible to realize live?
 
 Recommended workflow:
 
@@ -737,6 +739,63 @@ python agent.py --tag loophole-eq --quick --explore-every 4
 The most useful loophole-hunting outputs are usually not live-trading
 candidates.  They are diagnostic artifacts that tell you what the current score
 or guardrails still fail to penalize.
+
+A concrete example is [`results/strategyMinimax27.py`](results/strategyMinimax27.py).
+It looked like an exceptional saved equity winner, which is exactly why it was
+useful as a loophole-hunting specimen rather than as a trading candidate.
+
+The error was found in two steps:
+
+1. The strategy was flagged as suspicious because its reported result was far
+   stronger than nearby families while using a tight, fast-updating
+   Chandelier-style stop.
+2. The code was then reviewed with a strict execution-order mindset.  That
+   revealed that the strategy could raise its stop using the current bar's
+   `high` and then also exit on that same bar at the newly raised stop.  It
+   also credited stop exits at the stop level even when the observed `close`
+   had already moved through it.
+
+Those are not simple "fees are missing" issues.  They are modeling issues about
+what sequence of events is being assumed inside a daily OHLC bar.  When the
+same broad idea was replayed under stricter stop semantics, most of the
+spectacular edge disappeared.
+
+A corrected control version was created as
+[`results/strategyMinimax27fixed.py`](results/strategyMinimax27fixed.py)
+outside the agentic loop.  The fixed version keeps the same overall
+trend-continuation idea, but:
+
+- it only allows the stop carried into the current bar to trigger on that bar
+- it uses more conservative stop fills when price has already moved through the
+  stop
+- it keeps partial exits on whole shares
+
+That pair of files is the practical point of loophole hunting:
+[`results/strategyMinimax27.py`](results/strategyMinimax27.py) shows how the
+evaluator can be flattered, while
+[`results/strategyMinimax27fixed.py`](results/strategyMinimax27fixed.py) shows
+what happens when the execution assumption is tightened.
+
+Ideas to harden the full agent system against this class of error:
+
+1. Move execution semantics into shared framework code.  Strategies should
+   describe intent, while the harness should own fills, stop timing,
+   partial-exit rounding, and gap behavior.
+2. Add automatic shadow replays for every top candidate.  Re-run winners under
+   conservative stop fills, fees/slippage, and alternative baskets or a final
+   untouched holdout, then treat large performance collapse as a red flag.
+3. Add static lint checks for generated strategies.  Flag patterns such as
+   "use current-bar high/low to tighten a stop and also trigger it" or
+   "sell at the stop after the close has already crossed through it".
+4. Add small synthetic execution tests.  Feed strategies hand-built OHLC paths
+   that contain gaps, intrabar reversals, and stop-touch scenarios, and verify
+   that the resulting fills match the intended semantics.
+5. Score robustness, not only raw walk-forward wealth.  Penalize extreme
+   sensitivity to fill assumptions, single-ticker concentration, edge-hugging
+   parameter corners, and turnover that only works when frictions are absent.
+6. Add a verifier step to the autonomous loop.  Before saving a winner, run a
+   second reviewer prompt or scripted checker whose only job is to search for
+   execution-order bugs, accounting mistakes, and evaluator exploits.
 
 ## Design rationale
 
