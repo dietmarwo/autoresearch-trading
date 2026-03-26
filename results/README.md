@@ -1,6 +1,6 @@
 # Saved Strategy Results
 
-This folder contains four strategies that were re-evaluated with `analyze_results.py` using the default setup:
+This folder contains five strategies that were re-evaluated with `analyze_results.py` using the default setup:
 
 - Equities: `AAPL`, `AMD`, `GOOGL`, `NVDA`
 - Crypto: `BTC-USD`, `ETH-USD`, `XRP-USD`, `ADA-USD`
@@ -33,10 +33,11 @@ Existing research on AI in finance is broad and growing, which is one reason thi
 
 | File | Strategy | Market | Main idea | Final value | Log sharpe |
 |---|---|---|---|---:|---:|
-| `strategyFlashEq21.py` | `dpo_st_adx_v26_optimized` | Equity | Reactive pullback-in-uptrend system using SuperTrend, DPO, ADX, ATR, and RSI | 51.51M | 0.2095 |
-| `strategyFlashEq15.py` | `dpo_supertrend_adx_refined_v7` | Equity | Buy pullbacks inside strong uptrends, exit on reversal, ATR trail, or RSI profit-taking | 16.12M | 0.1381 |
-| `strategyMiniEq1.py` | `dpo_williams_adx_regime_v2` | Equity | Buy oversold pullbacks in confirmed trends, exit with ATR trail plus percentage floor | 10.15M | 0.1000 |
-| `strategyQwenCrypto.py` | `btc_patience_v11` | Crypto | Hold trend-following crypto positions with ADX-gated entries and adaptive ATR trailing exits | 9.88M | -0.1199 |
+| `strategyMinimax27.py` | `mfi_rsi_adx_chandelier_v6` | Equity | Volatility-aware trend-continuation system using ADX, MFI, RSI rebound confirmation, and a Chandelier-style ATR exit | 534.04M | 0.2842 |
+| `strategyFlashEq21.py` | `dpo_st_adx_v26_optimized` | Equity | Reactive pullback-in-uptrend system using SuperTrend, DPO, ADX, ATR, and RSI | 53.17M | 0.2122 |
+| `strategyFlashEq15.py` | `dpo_supertrend_adx_refined_v7` | Equity | Buy pullbacks inside strong uptrends, exit on reversal, ATR trail, or RSI profit-taking | 15.46M | 0.1312 |
+| `strategyMiniEq1.py` | `dpo_williams_adx_regime_v2` | Equity | Buy oversold pullbacks in confirmed trends, exit with ATR trail plus percentage floor | 10.18M | 0.1005 |
+| `strategyQwenCrypto.py` | `btc_patience_v11` | Crypto | Hold trend-following crypto positions with ADX-gated entries and adaptive ATR trailing exits | 9.61M | -0.1204 |
 
 ## Strategy Notes
 
