@@ -1,6 +1,6 @@
 # Saved Strategy Results
 
-This folder contains three strategies that were re-evaluated with `analyze_results.py` using the default setup:
+This folder contains four strategies that were re-evaluated with `analyze_results.py` using the default setup:
 
 - Equities: `AAPL`, `AMD`, `GOOGL`, `NVDA`
 - Crypto: `BTC-USD`, `ETH-USD`, `XRP-USD`, `ADA-USD`
@@ -33,11 +33,47 @@ Existing research on AI in finance is broad and growing, which is one reason thi
 
 | File | Strategy | Market | Main idea | Final value | Log sharpe |
 |---|---|---|---|---:|---:|
+| `strategyFlashEq21.py` | `dpo_st_adx_v26_optimized` | Equity | Reactive pullback-in-uptrend system using SuperTrend, DPO, ADX, ATR, and RSI | 51.51M | 0.2095 |
 | `strategyFlashEq15.py` | `dpo_supertrend_adx_refined_v7` | Equity | Buy pullbacks inside strong uptrends, exit on reversal, ATR trail, or RSI profit-taking | 16.12M | 0.1381 |
 | `strategyMiniEq1.py` | `dpo_williams_adx_regime_v2` | Equity | Buy oversold pullbacks in confirmed trends, exit with ATR trail plus percentage floor | 10.15M | 0.1000 |
 | `strategyQwenCrypto.py` | `btc_patience_v11` | Crypto | Hold trend-following crypto positions with ADX-gated entries and adaptive ATR trailing exits | 9.88M | -0.1199 |
 
 ## Strategy Notes
+
+### `strategyFlashEq21.py`
+
+This equity strategy is a more aggressive member of the same broad
+"buy pullbacks inside strong uptrends" family as `strategyFlashEq15.py`:
+
+- `SuperTrend` defines the direction regime
+- `DPO` looks for short pullbacks
+- `ADX` keeps entries inside stronger trends
+- `ATR` provides the trailing stop logic
+- `RSI` acts as a momentum/profit-taking exit
+
+Preliminary analysis suggests that this version wins by being much more
+reactive and much more willing to re-enter than the earlier Flash equity
+strategy. In the current analyzer output it is the strongest saved equity result
+in this folder, reaching `51.51M` final value with `0.2095` log sharpe / score,
+while staying profitable in all `16/16` walk-forward folds and generating
+`1,341` total trades.
+
+The fold-by-fold optimizer repeatedly converges toward very fast settings such
+as near-zero `st_mult`, very short `dpo_p`, and effectively no entry cooldown.
+That points to a strategy that is harvesting many short trend-aligned pullbacks
+rather than waiting for only the cleanest setups. This likely explains the much
+higher final value on the default equity basket, but it also makes the strategy
+more aggressive and a bit more suspicious from an overfitting and
+fees/slippage-sensitivity perspective than `strategyFlashEq15.py`.
+
+This also makes `strategyFlashEq21.py` a good example for the evaluator
+red-team workflow described in the main
+[`README.md`](../README.md#evaluation-loophole-hunting). It may still contain a
+real stock-mode edge, but its combination of high turnover, edge-hugging
+parameters, and strong dependence on the default basket is exactly the kind of
+result you would stress-test under fees, slippage, alternative tickers, and a
+final untouched holdout to see whether it is exploiting a weakness in the score
+or discovering something genuinely robust.
 
 ### `strategyFlashEq15.py`
 

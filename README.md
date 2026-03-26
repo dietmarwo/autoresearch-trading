@@ -146,7 +146,9 @@ agent.py                          ← agentic loop (LLM ↔ framework)
   │     ├── Utility               — crossover, z-score, drawdown, slope, ...
   │     └── warmup()              — pre-compiles all functions before fork()
   │
-  └── program_trade.md            ← instructions for the AI agent (read-only)
+  ├── program_trade.md            ← canonical instructions for the AI agent (read-only)
+  ├── program_trade_focussed.md   ← alternate prompt draft for A/B testing
+  └── results/                    ← saved benchmark strategies, charts, and analysis
 ```
 
 ## File descriptions
@@ -306,6 +308,35 @@ needs to design effective strategies.  It includes:
 
 The system prompt in `agent.py` is a further compression of this document,
 optimised for the context window of a local model (50K tokens minimum).
+
+### `program_trade_focussed.md` — alternate prompt draft
+
+This file is an A/B-test prompt variant derived from lessons learned in a
+strong Gemini stock-mode run.  It keeps the same overall structure as
+`program_trade.md`, but pushes the agent more strongly toward stock-friendly
+trend-aligned pullback logic, lighter confirmation stacks, and exploitation via
+bound refinement when one family is already working.
+
+`agent.py` still loads `program_trade.md` by default via
+`SYSTEM_PROMPT_FILE = "program_trade.md"`.  To test the focused draft, either:
+
+- temporarily copy the marked prompt block from `program_trade_focussed.md`
+  into `program_trade.md`, or
+- change `SYSTEM_PROMPT_FILE` in `agent.py` for that experiment branch.
+
+Keeping the focused draft separate makes it easy to compare prompt behavior
+without losing the current canonical prompt.
+
+### `results/` — saved strategy snapshots and analysis
+
+This folder contains saved strategy files, analyzer outputs, and comparison
+charts for a few representative runs.  It is the easiest place to inspect what
+strong historical winners actually looked like after re-evaluation.
+
+Start with [`results/README.md`](results/README.md), which summarizes the saved
+strategies, links them to their rough design patterns, and highlights where a
+high-scoring strategy may also be a good candidate for robustness checks or
+evaluation-loophole analysis.
 
 ## Performance characteristics
 
@@ -657,6 +688,56 @@ Conversation exchanges are kept lightweight (2 brief exchanges, no code
 duplication).  The full context — strategy code, curated experiment history, and
 reference discarded code — is regenerated fresh each turn in the user message.
 
+### Evaluation loophole hunting
+
+The agent loop can also be used as a red-team tool for the evaluation method
+itself.  Instead of asking the model to discover economically sensible
+strategies, you can ask it to search for strategies that maximize the current
+score by exploiting weak spots in the harness.
+
+This is useful when you want to answer questions like:
+
+- Are there strategy families that score well mainly because fees and slippage
+  are missing?
+- Are there degenerate parameter corners that the optimizer keeps exploiting?
+- Can the score be gamed by basket-specific behavior, extreme turnover, or
+  low-volatility-but-not-economically-interesting trades?
+
+Recommended workflow:
+
+1. Keep `trading.py` unchanged.  If the goal is to test the evaluator, do not
+   "fix" the loopholes first.
+2. Run on a dedicated tag or branch so the red-team search does not pollute a
+   normal research run.
+3. Modify the prompt, not the scoring code.  Tell the model explicitly to
+   maximize SCORE by exploiting evaluator weaknesses rather than by being
+   realistic.
+4. Let the agent search normally with walk-forward enabled.  `--quick` is often
+   enough to surface suspicious families quickly.
+5. Inspect winners for red flags the score does not currently penalize well:
+   very high turnover, edge-hugging parameters, degenerate indicator settings,
+   heavy dependence on one ticker, or unrealistic re-entry behavior.
+6. Re-test suspicious winners on different tickers, on a final untouched
+   holdout, and under hypothetical fees/slippage to see whether the edge
+   survives outside the loophole.
+
+Two practical ways to do this are:
+
+- Edit `program_trade.md` directly for an adversarial run.
+- Start from `program_trade_focussed.md` as a separate prompt draft and adjust
+  its guidance toward explicit evaluator red-teaming.
+
+Example:
+
+```bash
+# Use a separate branch/tag for loophole hunting
+python agent.py --tag loophole-eq --quick --explore-every 4
+```
+
+The most useful loophole-hunting outputs are usually not live-trading
+candidates.  They are diagnostic artifacts that tell you what the current score
+or guardrails still fail to penalize.
+
 ## Design rationale
 
 ### Why separate structure from parameters?
@@ -742,6 +823,8 @@ of work done at numpy/numba speed.
 
 ## Recent Updates:
 
+- Added `program_trade_focussed.md` as an alternate prompt draft for A/B testing and documented how to swap it in for experimental runs without replacing the canonical prompt.
+- Added README guidance on using the autonomous loop for "evaluation loophole hunting", including a red-team workflow that targets weaknesses in the current score and guardrails.
 - Added equity-specific prompt guidance in `agent.py`, so stock-mode runs now remind the model that scoring is versus cash, long cash periods can be costly in bull trends, and over-filtered flat/no-trade strategies are not acceptable.
 - Updated the shipped strategy template and canonical prompt after investigating strange crypto walk-forward numbers: the docs now avoid teaching `@njit(fastmath=True)` in NaN-gated trading loops, clarify that `*_pct` variables are percent points that must be scaled by `0.01`, and document the root cause of bogus `alpha=1.000` / `score=0.0000` style outputs.
 - Made `program_trade.md` the single source of truth for the agent system prompt. `agent.py` now loads only the marked compact prompt block at runtime and fails fast if the markers are missing or invalid, instead of silently falling back to a stale in-code copy.
