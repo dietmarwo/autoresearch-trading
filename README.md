@@ -27,10 +27,17 @@ Because the optimizer perfectly tuned the numbers first, the score is a pure ref
 
 This "split brain" approach—letting an AI write the discrete logic tree while a classic optimizer tunes the continuous numbers—isn't just for trading. It solves the exact same problem anywhere you have a fast simulator. 
 
+A concrete sister project is
+[`autoresearch-circuit`](https://github.com/dietmarwo/autoresearch-circuit),
+which applies the same pattern to biochemical circuit design: the AI proposes
+structure and logic, while the optimizer tunes continuous parameters against a
+biochemical circuit simulator.
+
 ![Beyond trading](img/beyond_trading.svg)
 
 Here are a few other places this architecture shines:
 
+* **Biochemical Circuit Design:** See [`autoresearch-circuit`](https://github.com/dietmarwo/autoresearch-circuit). The AI can propose a biochemical circuit topology or regulatory logic, while the optimizer tunes continuous reaction and control parameters against simulation targets.
 * **Robotics and Control Systems:** The AI writes the state machine for a robot arm (e.g., approach, grab, lift). The optimizer then runs a physics simulation to tune the exact PID gains, motor torques, and acceleration curves.
 * **Supply Chain and Logistics:** The AI writes the heuristic routing rules for a warehouse. The optimizer runs Monte Carlo simulations to find the perfect safety stock thresholds and delay penalties.
 * **Chemical Engineering and Materials:** The AI proposes a sequence of manufacturing steps or a new polymer blend based on research papers. The optimizer runs a simulator to dial in the exact baking temperatures, atmospheric pressures, and molar ratios.
