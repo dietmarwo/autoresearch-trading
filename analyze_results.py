@@ -377,7 +377,7 @@ def plot_market(
 
     fig, ax = plt.subplots(figsize=(12, 7))
     for analysis in market_analyses:
-        ax.plot(
+        ax.semilogy(
             analysis.dates,
             cumulative_product(analysis.fold_factors),
             marker="o",
@@ -385,7 +385,7 @@ def plot_market(
             label=analysis.file_name,
         )
     reference = market_analyses[0]
-    ax.plot(
+    ax.semilogy(
         reference.dates,
         cumulative_product(reference.hodl_factors),
         linestyle="--",
