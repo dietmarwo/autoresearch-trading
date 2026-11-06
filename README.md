@@ -4,6 +4,8 @@
 
 ![Example agent progress over time and per cycle](img/progress.png)
 
+> **One of 18 related repositories.** The [repository overview](https://github.com/dietmarwo/fcmaes-rust/blob/main/docs/repositories.md) shows what each one does and how they connect.
+
 Autonomous AI-driven discovery of trading strategies, inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch).
 
 ## The Core Idea: Splitting the Brain
