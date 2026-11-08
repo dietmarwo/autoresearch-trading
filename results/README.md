@@ -36,12 +36,12 @@ Existing research on AI in finance is broad and growing, which is one reason thi
 
 | File | Strategy | Market | Main idea | Final value | Log sharpe |
 |---|---|---|---|---:|---:|
-| `strategyMinimax27.py` | `mfi_rsi_adx_chandelier_v6` | Equity | Volatility-aware trend-continuation system using ADX, MFI, RSI rebound confirmation, and a Chandelier-style ATR exit | 534.04M | 0.2842 |
-| `strategyMinimax27fixed.py` | `mfi_rsi_adx_chandelier_v6_fixed` | Equity | Corrected control version of `strategyMinimax27.py` with conservative stop execution and whole-share partial exits | 1.49M | -0.0060 |
-| `strategyFlashEq21.py` | `dpo_st_adx_v26_optimized` | Equity | Reactive pullback-in-uptrend system using SuperTrend, DPO, ADX, ATR, and RSI | 53.17M | 0.2122 |
-| `strategyFlashEq15.py` | `dpo_supertrend_adx_refined_v7` | Equity | Buy pullbacks inside strong uptrends, exit on reversal, ATR trail, or RSI profit-taking | 15.46M | 0.1312 |
-| `strategyMiniEq1.py` | `dpo_williams_adx_regime_v2` | Equity | Buy oversold pullbacks in confirmed trends, exit with ATR trail plus percentage floor | 10.18M | 0.1005 |
-| `strategyQwenCrypto.py` | `btc_patience_v11` | Crypto | Hold trend-following crypto positions with ADX-gated entries and adaptive ATR trailing exits | 9.61M | -0.1204 |
+| `strategyMinimax27.py` | `mfi_rsi_adx_chandelier_v6` | Equity | Volatility-aware trend-continuation system using ADX, MFI, RSI rebound confirmation, and a Chandelier-style ATR exit | 489.23M | 0.2804 |
+| `strategyMinimax27fixed.py` | `mfi_rsi_adx_chandelier_v6_fixed` | Equity | Corrected control version of `strategyMinimax27.py` with conservative stop execution and whole-share partial exits | 1.73M | -0.0022 |
+| `strategyFlashEq21.py` | `dpo_st_adx_v26_optimized` | Equity | Reactive pullback-in-uptrend system using SuperTrend, DPO, ADX, ATR, and RSI | 54.57M | 0.2121 |
+| `strategyFlashEq15.py` | `dpo_supertrend_adx_refined_v7` | Equity | Buy pullbacks inside strong uptrends, exit on reversal, ATR trail, or RSI profit-taking | 14.49M | 0.1309 |
+| `strategyMiniEq1.py` | `dpo_williams_adx_regime_v2` | Equity | Buy oversold pullbacks in confirmed trends, exit with ATR trail plus percentage floor | 10.93M | 0.1028 |
+| `strategyQwenCrypto.py` | `btc_patience_v11` | Crypto | Hold trend-following crypto positions with ADX-gated entries and adaptive ATR trailing exits | 9.43M | -0.1217 |
 
 ## Strategy Notes
 
@@ -66,8 +66,8 @@ more interested in catching the middle of sustained continuation moves while
 still re-entering quickly when the trend resets.
 
 That behavior lines up with the current analyzer output. It is the strongest
-saved equity result in this folder, reaching roughly `534.04M` relative final
-value with `0.2842` log sharpe / score, while staying profitable in all
+saved equity result in this folder, reaching roughly `489.23M` relative final
+value with `0.2804` log sharpe / score, while staying profitable in all
 `16/16` walk-forward folds. The gains are also fairly broad across the default
 equity basket rather than coming from only one lucky ticker, although `AMD` and
 `NVDA` appear to be the main performance accelerants.
@@ -93,8 +93,8 @@ agentic loop as a corrected control version of `strategyMinimax27.py`.
 - partial profit-taking sells whole shares only
 
 Under the same default equity walk-forward setup, this fixed version reached
-roughly `1.49M` final value with `-0.0060` log sharpe / score, was profitable
-in `10/16` folds, and generated `391` total trades. That makes it useful as a
+roughly `1.73M` final value with `-0.0022` log sharpe / score, was profitable
+in `11/16` folds, and generated `349` total trades. That makes it useful as a
 control strategy: it still compounds modestly in raw capital terms, but the
 risk-adjusted edge largely disappears once the optimistic stop handling is
 removed.
@@ -112,10 +112,10 @@ This equity strategy found by gemini-flash-3.1 is a more aggressive member of th
 
 Preliminary analysis suggests that this version wins by being much more
 reactive and much more willing to re-enter than the earlier Flash equity
-strategy. In the current analyzer output it is the strongest saved equity result
-in this folder, reaching `51.51M` final value with `0.2095` log sharpe / score,
-while staying profitable in all `16/16` walk-forward folds and generating
-`1,341` total trades.
+strategy. In the current analyzer output it is the second-strongest saved equity
+result in this folder after `strategyMinimax27.py`, reaching `54.57M` final value
+with `0.2121` log sharpe / score, while staying profitable in all `16/16`
+walk-forward folds and generating `1,343` total trades.
 
 The fold-by-fold optimizer repeatedly converges toward very fast settings such
 as near-zero `st_mult`, very short `dpo_p`, and effectively no entry cooldown.
@@ -193,7 +193,7 @@ The design is meant to let strong crypto trends run while using wider, trend-awa
 
 - `summary.tsv`: compact numerical summary of the latest run
 - `details.json`: per-strategy fold-by-fold data used for plotting
-- `analyze_results.log`: full analyzer log
+- `analyze_results.py` also writes `analyze_results.log`, the full analyzer log; it is not included here
 - `*.png`: comparison charts for equity and crypto
 
 ## Selected References

@@ -290,7 +290,7 @@ common failure mode — numba type errors from calling non-njit functions inside
 best overall experiments, best-per-family representatives, strong discarded
 near-misses, representative failure modes, and recent experiments.  Most turns
 also include the current best strategy code plus 2 alternative reference
-strategies from different families.  Every exploration turn (default: every 6
+strategies from different families.  Every exploration turn (default: every 3
 completed experiments) hides the current best code and instead shows up to 3
 alternative reference strategies so the model is pushed to branch out instead of
 hill-climbing forever.  Only 2 lightweight conversation exchanges are kept
@@ -315,8 +315,9 @@ needs to design effective strategies.  It includes:
   components).
 - The exact experiment loop specification.
 
-The system prompt in `agent.py` is a further compression of this document,
-optimised for the context window of a local model (50K tokens minimum).
+`agent.py` sends the part of this file between the `AUTORESEARCH_AGENT_PROMPT`
+markers as its system prompt, sized for the context window of a local model
+(50K tokens minimum).
 
 ### `program_trade_focussed.md` — alternate prompt draft
 
@@ -354,11 +355,11 @@ On a 16-core AMD 9950x:
 | Operation | Time | Notes |
 |---|---|---|
 | Single-window optimisation (4 tickers) | ~1 second | 24 parallel BiteOpt retries × 500 evals each |
-| Walk-forward (25 folds, default settings) | 1–2 minutes | 25 × optimisation + evaluation |
+| Walk-forward (default settings: 16 folds on the equity basket, 25 on crypto) | 1–2 minutes | one optimisation + evaluation per fold |
 | Walk-forward (quick mode, agent.py) | 15–30 seconds | 8 retries × 250 evals |
 | Strategy evaluation throughput | 10,000+ / second | numba + numpy, all cores |
 | Agent loop (default) | ~3 min/experiment | LLM inference + walk-forward |
-| Agent loop (full validation) | ~10 min/experiment | 48 retries, 2000 evals via --num-retries/--max-evals |
+| Full validation (`trading.py`) | ~10 min | `--num-retries 48 --max-evals 2000`; `agent.py` has no such options |
 
 ## Quick start
 
@@ -546,7 +547,7 @@ python agent.py --tag mar18
 python agent.py --tag mar18-crypto --tickers BTC-USD ETH-USD XRP-USD ADA-USD --quick
 
 # Push exploration turns more often
-python agent.py --tag mar18 --explore-every 4 --quick
+python agent.py --tag mar18 --explore-every 2 --quick
 
 # Restart from a saved strategy file instead of base_strategy.py
 python agent.py --tag mar18-restart --seed-file ./saved_strategy.py --quick
@@ -620,12 +621,12 @@ The agent now alternates between two prompt styles:
 - **Exploitation turns** — show the current best code and ask for a stronger refinement.
 - **Exploration turns** — hide the current best code, show more alternative references, and explicitly ask for a structurally different valid idea.
 
-By default, an exploration turn happens every 6 completed experiments.  You can
+By default, an exploration turn happens every 3 completed experiments.  You can
 change that with:
 
 ```bash
 # Explore more aggressively
-python agent.py --tag mar20 --explore-every 4 --quick
+python agent.py --tag mar20 --explore-every 2 --quick
 
 # Disable scheduled exploration turns
 python agent.py --tag mar20 --explore-every 0
@@ -658,7 +659,7 @@ Yahoo Finance ticker works.  Examples:
 ### Different validation settings
 
 ```bash
-# Longer training window (2 years instead of 1)
+# Longer training window (504 bars, about 2 years of equity data; default 365)
 --train-days 504
 
 # Shorter test window
